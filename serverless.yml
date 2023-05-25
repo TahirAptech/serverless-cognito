@@ -1,0 +1,147 @@
+service: wordpress-serverless
+
+frameworkVersion: '2 || 3'
+
+provider:
+  name: aws
+  profile: tahir
+  runtime: nodejs14.x
+  lambdaHashingVersion: 20201221
+  region: us-east-1
+  stage: dev
+  environment:
+    STAGE: ${self:provider.stage}
+    REGION: ${self:provider.region}
+    ACCOUNT_TABLE: !Ref AccountTable
+    USER_TABLE: !Ref UserTable
+    UserPoolId: !Ref MyUserPool
+    ClientId: !Ref MyUserPoolClient
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - cognito-idp:*
+      Resource:
+        - Fn::GetAtt: [MyUserPool, Arn]
+    - Effect: Allow
+      Action: 
+        - dynamodb:*
+      Resource:
+        - !GetAtt UserTable.Arn
+        - !GetAtt AccountTable.Arn
+    - Effect: Allow
+      Action: 
+        - lambda:*
+      Resource: "*"
+
+functions:
+  #Auth
+  auth:
+    handler: functions/auth.authorizer
+  testLambda:
+    handler: functions/test.handler
+  otherLambda:
+    handler: functions/otherLambda.handler
+
+  #Triggers
+  postConfirmationTrigger:
+    handler: functions/postConfirmationTrigger.handler
+  preSignupTrigger:
+    handler: functions/preSignupTrigger.handler
+    events:
+      - cognitoUserPool:
+          pool: 
+            Ref: MyUserPool
+          trigger: PostConfirmation
+          existing: true
+          forceDeploy: true
+
+  createUser:
+    handler: functions/createUser.handler
+    events:
+      - http:
+          path: /createUser
+          method: post
+          authorizer: auth
+  createDealer:
+    handler: functions/dealer.handler
+  createAccount:
+    handler: functions/account.handler
+
+resources:
+  Resources:
+    UserTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: UserTable
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: pk
+            AttributeType: S
+          - AttributeName: sk
+            AttributeType: S
+        KeySchema:
+          - AttributeName: pk
+            KeyType: HASH
+          - AttributeName: sk
+            KeyType: RANGE
+    AccountTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: AccountTable
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: pk
+            AttributeType: S
+          - AttributeName: sk
+            AttributeType: S
+        KeySchema:
+          - AttributeName: pk
+            KeyType: HASH
+          - AttributeName: sk
+            KeyType: RANGE
+
+    MyUserPoolClient:
+      Type: AWS::Cognito::UserPoolClient
+      Properties:
+        ClientName: MyUserPoolClient
+        UserPoolId:
+          Ref: MyUserPool
+        GenerateSecret: false
+
+    MyUserPool:
+      Type: AWS::Cognito::UserPool
+      Properties:
+        UserPoolName: WP_UserPool
+        AutoVerifiedAttributes:
+          - email
+        UsernameAttributes:
+          - email
+        Schema:
+          - AttributeDataType: String
+            Name: dealerId
+            Mutable: true
+          - AttributeDataType: Boolean
+            Name: isDealer
+            Mutable: true
+          - AttributeDataType: String
+            Name: accountId
+            Mutable: true
+          - AttributeDataType: String
+            Name: givenName
+            Mutable: true
+          - AttributeDataType: String
+            Name: familyName
+            Mutable: true
+        VerificationMessageTemplate:
+          DefaultEmailOption: "CONFIRM_WITH_LINK"
+    DealerGroup:
+      Type: AWS::Cognito::UserPoolGroup
+      Properties:
+        GroupName: dealer
+        UserPoolId: !Ref MyUserPool
+    UserPoolDomain:
+      Type: AWS::Cognito::UserPoolDomain
+      Properties:
+        Domain: dev-pool
+        UserPoolId: !Ref MyUserPool
+        
